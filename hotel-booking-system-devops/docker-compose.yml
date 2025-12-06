@@ -1,0 +1,66 @@
+# version: "3.8"
+
+services:
+  # MongoDB Service
+  mongodb:
+    image: mongo:7.0
+    container_name: hotel-booking-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - hotel-booking-network
+
+  # Backend Service
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: hotel-booking-backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./server/.env
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - mongodb
+    networks:
+      - hotel-booking-network
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        - VITE_BACKEND_URL=${VITE_BACKEND_URL:-http://localhost:3000}
+        - VITE_CURRENCY=${VITE_CURRENCY:-$}
+        - VITE_CLERK_PUBLISHABLE_KEY=${VITE_CLERK_PUBLISHABLE_KEY}
+        - VITE_STRIPE_PUBLISHABLE_KEY=${VITE_STRIPE_PUBLISHABLE_KEY}
+    ports:
+      - "5000:80"
+    env_file:
+      - ./client/.env
+    container_name: hotel-booking-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - hotel-booking-network
+
+networks:
+  hotel-booking-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
