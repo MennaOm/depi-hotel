@@ -10,6 +10,14 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.23"
     }
+    kubernetes-alpha = {
+      source  = "hashicorp/kubernetes-alpha"
+      version = ">= 0.4.0"
+    }
+    kubectl = {
+      source  = "alekc/kubectl"
+      version = "~> 2.0"
+    }
     helm = {
       source  = "hashicorp/helm"
       version = "~> 2.11"
@@ -61,7 +69,6 @@ module "vpc" {
   }
 }
 
-# EKS Module
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 20.0"
@@ -76,8 +83,14 @@ module "eks" {
   enable_irsa = true
   enable_cluster_creator_admin_permissions = true
 
-  # Cluster access configuration
-  authentication_mode = "API_AND_CONFIG_MAP"
+  # Enable encryption
+  cluster_encryption_config = [
+  {
+    resources        = ["secrets"]
+    provider_key_arn = "arn:aws:kms:us-east-1:943538516758:key/595b9719-ce22-429a-a772-87579cb74b04"
+  }
+]
+
 
   eks_managed_node_groups = {
     general = {
@@ -406,8 +419,57 @@ resource "null_resource" "wait_for_cluster" {
 
 # Kubernetes provider - using exec for authentication
 provider "kubernetes" {
-  host                   = module.eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+  host                   = var.enable_k8s_providers ? module.eks.cluster_endpoint : ""
+  cluster_ca_certificate = var.enable_k8s_providers ? base64decode(module.eks.cluster_certificate_authority_data) : ""
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+
+    args = [
+      "eks",
+      "get-token",
+      "--cluster-name", module.eks.cluster_name,
+      "--region", var.aws_region
+    ]
+
+    env = {}
+  }
+}
+
+
+provider "kubernetes-alpha" {
+  host                   = var.enable_k8s_providers ? module.eks.cluster_endpoint : ""
+  cluster_ca_certificate = var.enable_k8s_providers ? base64decode(module.eks.cluster_certificate_authority_data) : ""
+
+  exec = var.enable_k8s_providers ? {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args = [
+      "eks",
+      "get-token",
+      "--cluster-name", module.eks.cluster_name,
+      "--region", var.aws_region
+    ]
+    env = {}
+  } : null
+}
+
+data "aws_eks_cluster" "this" {
+  name = module.eks.cluster_name
+}
+
+data "aws_eks_cluster_auth" "this" {
+  name = module.eks.cluster_name
+}
+
+
+provider "kubectl" {
+  apply_retry_count = 5
+  load_config_file  = false
+
+  host                   = var.enable_k8s_providers ? module.eks.cluster_endpoint : ""
+  cluster_ca_certificate = var.enable_k8s_providers ? base64decode(module.eks.cluster_certificate_authority_data) : ""
 
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
@@ -415,18 +477,17 @@ provider "kubernetes" {
     args = [
       "eks",
       "get-token",
-      "--cluster-name",
-      module.eks.cluster_name,
-      "--region",
-      var.aws_region
+      "--cluster-name", module.eks.cluster_name,
+      "--region", var.aws_region
     ]
+    env = {}
   }
 }
 
 provider "helm" {
   kubernetes {
-    host                   = module.eks.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+    host                   = var.enable_k8s_providers ? module.eks.cluster_endpoint : ""
+    cluster_ca_certificate = var.enable_k8s_providers ? base64decode(module.eks.cluster_certificate_authority_data) : ""
 
     exec {
       api_version = "client.authentication.k8s.io/v1beta1"
@@ -434,14 +495,14 @@ provider "helm" {
       args = [
         "eks",
         "get-token",
-        "--cluster-name",
-        module.eks.cluster_name,
-        "--region",
-        var.aws_region
+        "--cluster-name", module.eks.cluster_name,
+        "--region", var.aws_region
       ]
+      env = {}
     }
   }
 }
+
 
 # EBS CSI Driver addon with service account
 resource "aws_eks_addon" "ebs_csi_driver" {
