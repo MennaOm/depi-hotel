@@ -1,3 +1,8 @@
+variable "enable_k8s_providers" {
+  type    = bool
+  default = false
+}
+
 variable "aws_region" {
   description = "AWS region"
   type        = string
@@ -115,4 +120,19 @@ variable "frontend_replicas" {
 variable "grafana_admin_password" {
   type      = string
   sensitive = true
+}
+
+variable "cluster_endpoint" {
+  description = "Kubernetes API server endpoint"
+  type        = string
+}
+
+variable "cluster_ca" {
+  description = "Cluster certificate authority (base64 encoded)"
+  type        = string
+}
+
+variable "cluster_token" {
+  description = "Authentication token for Kubernetes cluster"
+  type        = string
 }
